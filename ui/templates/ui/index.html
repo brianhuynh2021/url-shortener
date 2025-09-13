@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>URL Shortener UI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div class="max-w-5xl mx-auto p-6">
+    <header class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-bold">🔗 URL Shortener + Analytics (Trực quan dữ liệu)</h1>
+
+      <!-- Thanh user status (ẩn nếu chưa đăng nhập) -->
+      <div id="userBar" class="hidden flex items-center gap-3">
+        <span class="text-sm text-slate-700">
+          Đăng nhập: <b id="userName" class="text-slate-900">user</b>
+        </span>
+        <button id="btnLogout" class="px-3 py-1.5 rounded bg-slate-800 text-white hover:bg-black">
+          Logout
+        </button>
+      </div>
+
+      <div>
+        <a class="text-sm underline mr-4" href="/api/schema/swagger-ui/" target="_blank">Swagger</a>
+        <a class="text-sm underline" href="/api/schema/redoc/" target="_blank">Redoc</a>
+      </div>
+    </header>
+
+    <!-- Login Section (ẩn sau khi đăng nhập) -->
+    <section id="loginSection" class="bg-white rounded-2xl shadow p-5 mb-6">
+      <h2 class="font-semibold mb-3">Đăng nhập (JWT)</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <input id="username" class="border rounded px-3 py-2" placeholder="username (hai hoặc admin)" />
+        <input id="password" type="password" class="border rounded px-3 py-2" placeholder="password123" />
+        <button id="btnLogin" class="bg-blue-600 hover:bg-blue-700 text-white rounded px-4 py-2">Login</button>
+      </div>
+      <p id="loginMsg" class="text-sm text-slate-600 mt-2"></p>
+    </section>
+
+    <section class="bg-white rounded-2xl shadow p-5 mb-6">
+      <h2 class="font-semibold mb-3">Tạo link rút gọn</h2>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <input id="title" class="border rounded px-3 py-2" placeholder="Title"/>
+        <input id="target" class="border rounded px-3 py-2" placeholder="https://..."/>
+        <input id="slug" class="border rounded px-3 py-2" placeholder="Slug (tuỳ chọn)"/>
+        <button id="btnCreate" class="bg-emerald-600 hover:bg-emerald-700 text-white rounded px-4 py-2">Tạo</button>
+      </div>
+    </section>
+
+    <section class="bg-white rounded-2xl shadow p-5 mb-6">
+      <h2 class="font-semibold mb-3">Tìm kiếm & lọc</h2>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <input id="q" class="border rounded px-3 py-2" placeholder="q theo title"/>
+        <input id="created_at" class="border rounded px-3 py-2" placeholder="YYYY-MM-DD"/>
+        <input id="page" class="border rounded px-3 py-2" placeholder="page (số)"/>
+        <button id="btnReload" class="bg-slate-700 hover:bg-slate-800 text-white rounded px-4 py-2">Load links</button>
+      </div>
+    </section>
+
+    <section class="bg-white rounded-2xl shadow p-5">
+      <h2 class="font-semibold mb-3">Danh sách link của tôi</h2>
+      <div id="list" class="space-y-3"></div>
+    </section>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow p-5 w-full max-w-2xl">
+      <div class="flex justify-between items-center mb-4">
+        <h3 id="modalTitle" class="font-semibold">Chi tiết</h3>
+        <button onclick="closeModal()" class="text-slate-500 hover:text-black">✕</button>
+      </div>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+<script>
+const state = { access: null, username: null };
+
+function api(path, opts={}) {
+  const headers = opts.headers || {};
+  headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+  if (state.access) headers['Authorization'] = 'Bearer ' + state.access;
+  return fetch(path, { ...opts, headers });
+}
+function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstChild; }
+function toast(msg){ const p=document.getElementById('loginMsg'); p.textContent = msg; }
+
+function updateAuthUI(){
+  const authed = !!state.access;
+  document.getElementById('loginSection').classList.toggle('hidden', authed);
+  document.getElementById('userBar').classList.toggle('hidden', !authed);
+  document.getElementById('userName').textContent = state.username || 'user';
+}
+
+async function login(){
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value.trim();
+  const res = await api('/api/auth/login/', { method:'POST', body: JSON.stringify({username, password}) });
+  if(!res.ok){ toast('Login failed'); return; }
+  const data = await res.json();
+  state.access = data.access;
+  state.username = username;
+  localStorage.setItem('access', state.access);
+  localStorage.setItem('username', state.username);
+  toast('Đăng nhập OK');
+  updateAuthUI();
+  await loadLinks();
+}
+
+function logout(){
+  state.access = null;
+  state.username = null;
+  localStorage.removeItem('access');
+  localStorage.removeItem('username');
+  updateAuthUI();
+  document.getElementById('list').innerHTML = '';
+  toast('Đã logout');
+}
+
+async function loadLinks(){
+  const q = document.getElementById('q').value.trim();
+  const created_at = document.getElementById('created_at').value.trim();
+  const page = document.getElementById('page').value.trim();
+  const params = new URLSearchParams();
+  if(q) params.set('q', q);
+  if(created_at) params.set('created_at', created_at);
+  if(page) params.set('page', page);
+  const url = '/api/links/' + (params.toString()? ('?'+params.toString()) : '');
+  const res = await api(url);
+  const list = document.getElementById('list'); list.innerHTML = '';
+  if(!res.ok){
+    list.append(el('<div class="p-3 bg-red-50 text-red-700 rounded">Unauthorized. Hãy đăng nhập.</div>'));
+    return;
+  }
+  const data = await res.json();
+  const items = data.results || data;
+  if(!items.length){
+    list.append(el('<div class="p-3 bg-slate-50 text-slate-600 rounded">Chưa có link nào.</div>')); return;
+  }
+  for(const it of items){
+    const shortUrl = location.origin + '/r/' + it.slug + '/';
+    const card = el(`
+      <div class="border rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between">
+        <div class="space-y-1">
+          <div class="font-medium">${it.title}</div>
+          <div class="text-sm text-slate-600 break-all">${it.target_url}</div>
+          <div class="text-sm">Slug: <span class="font-mono">${it.slug}</span> • Clicks: <b>${it.clicks_count ?? 0}</b></div>
+          <div class="text-sm">Short: <a class="underline text-blue-700" href="${shortUrl}" target="_blank">${shortUrl}</a></div>
+        </div>
+        <div class="mt-3 md:mt-0 flex gap-2">
+          <button class="px-3 py-2 rounded bg-emerald-600 text-white" onclick="showStats(${it.id}, '${it.title.replace(/'/g, "\\'")}')">Stats</button>
+          <button class="px-3 py-2 rounded bg-indigo-600 text-white" onclick="showQR(${it.id}, '${it.slug}')">QR</button>
+          <button class="px-3 py-2 rounded bg-yellow-500 text-white" onclick="editTitle(${it.id}, '${it.title.replace(/'/g, "\\'")}')">Edit</button>
+          <button class="px-3 py-2 rounded bg-red-600 text-white" onclick="deleteLink(${it.id})">Del</button>
+        </div>
+      </div>
+    `);
+    list.append(card);
+  }
+}
+
+function openModal(title, bodyEl){
+  document.getElementById('modalTitle').textContent = title;
+  const body = document.getElementById('modalBody'); body.innerHTML=''; body.append(bodyEl);
+  document.getElementById('modal').classList.remove('hidden'); document.getElementById('modal').classList.add('flex');
+}
+function closeModal(){ document.getElementById('modal').classList.add('hidden'); document.getElementById('modal').classList.remove('flex'); }
+
+async function showStats(id, title){
+  const res = await api(`/api/links/${id}/stats/?range=7d`);
+  if(!res.ok){ alert('Lỗi tải stats'); return; }
+  const data = await res.json();
+  const labels = data.daily_clicks.map(d => d.date), values = data.daily_clicks.map(d => d.count);
+  const wrap = el(`<div><canvas id="chart" height="120"></canvas><p class="text-sm text-slate-600 mt-2">Tổng 7 ngày: <b>${data.total_clicks}</b></p></div>`);
+  openModal('Thống kê: ' + title, wrap);
+  new Chart(wrap.querySelector('#chart'), { type:'bar', data:{ labels, datasets:[{ label:'Clicks', data: values }] }, options:{ scales:{ y:{ beginAtZero:true } } } });
+}
+
+async function showQR(id, slug){
+  const res = await api(`/api/links/${id}/qr/`);
+  if(!res.ok){ alert('Lỗi lấy QR'); return; }
+  const blob = await res.blob(); const url = URL.createObjectURL(blob);
+  const short = `${location.origin}/r/${slug}/`;
+  const wrap = el(`
+    <div class="text-center">
+      <img class="mx-auto" src="${url}" alt="QR for ${slug}" />
+      <p class="mt-2 text-sm">${short}</p>
+      <div class="mt-3 flex gap-2 justify-center">
+        <a href="${url}" download="${slug}.png"
+           class="px-3 py-2 rounded bg-emerald-600 text-white">Download PNG</a>
+        <button class="px-3 py-2 rounded bg-slate-700 text-white"
+                onclick="navigator.clipboard.writeText('${short}')">Copy link</button>
+      </div>
+    </div>`);
+  openModal('QR cho ' + slug, wrap);
+}
+
+async function editTitle(id, oldTitle){
+  const newTitle = prompt('Nhập title mới:', oldTitle); if(newTitle===null) return;
+  const res = await api(`/api/links/${id}/`, { method:'PATCH', body: JSON.stringify({ title: newTitle }) });
+  if(!res.ok){ alert('Lỗi cập nhật'); return; } await loadLinks();
+}
+async function deleteLink(id){
+  if(!confirm('Xoá link này?')) return;
+  const res = await api(`/api/links/${id}/`, { method:'DELETE' });
+  if(res.status!==204){ alert('Xoá thất bại'); return; } await loadLinks();
+}
+
+document.getElementById('btnLogin').addEventListener('click', login);
+document.getElementById('btnCreate').addEventListener('click', createLink);
+document.getElementById('btnReload').addEventListener('click', loadLinks);
+document.getElementById('btnLogout').addEventListener('click', logout);
+
+window.addEventListener('load', ()=>{
+  const t=localStorage.getItem('access');
+  const u=localStorage.getItem('username');
+  if(t){ state.access=t; state.username=u || null; toast('Đã dùng token sẵn có'); updateAuthUI(); loadLinks(); }
+  else { updateAuthUI(); }
+});
+</script>
+</body>
+</html>

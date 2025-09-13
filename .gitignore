@@ -1,0 +1,20 @@
+# Python / Django
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+env/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+
+# Django collectstatic (nếu có)
+staticfiles/
+media/
+
+# Docker
+*.log
