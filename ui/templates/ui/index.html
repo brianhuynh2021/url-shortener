@@ -346,7 +346,7 @@ async function saveEditLink(id){
   await loadLinks();
 }
 async function deleteLink(id){
-  if(!confirm('Xoá link này?')) return;
+  if(!confirm('Bạn có chắc muốn xoá link này?')) return;
   const res = await api(`/api/links/${id}/`, { method:'DELETE' });
   if(res.status!==204){ alert('Xoá thất bại'); return; } await loadLinks();
 }
