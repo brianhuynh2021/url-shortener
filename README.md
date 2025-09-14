@@ -1,6 +1,5 @@
 # URL Shortener + Analytics
 
-- 100% **APIView**
 - JWT auth (SimpleJWT), OpenAPI (Swagger/Redoc)
 - CRUD Link, Redirect `/r/<slug>/`, Thống kê 7/30 ngày, Top, QR
 - **Auto-seed**:  

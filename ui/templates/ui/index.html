@@ -120,6 +120,29 @@ function logout(){
   toast('Đã logout');
 }
 
+async function createLink(){
+  const title = document.getElementById('title').value.trim();
+  const target = document.getElementById('target').value.trim();
+  const slug = document.getElementById('slug').value.trim();
+  if(!state.access){ alert('Hãy đăng nhập trước.'); return; }
+  if(!title || !target){ alert('Vui lòng nhập Title và URL đích.'); return; }
+  const payload = { title, target_url: target };
+  if (slug) payload.slug = slug;
+  const res = await api('/api/links/', { method:'POST', body: JSON.stringify(payload) });
+  if(!res.ok){
+    let msg = 'Tạo link thất bại';
+    try { const err = await res.json(); msg = JSON.stringify(err); } catch(e) {}
+    alert(msg);
+    return;
+  }
+  // Clear inputs and refresh list
+  document.getElementById('title').value = '';
+  document.getElementById('target').value = '';
+  document.getElementById('slug').value = '';
+  toast('Đã tạo link mới');
+  await loadLinks();
+}
+
 async function loadLinks(){
   const q = document.getElementById('q').value.trim();
   const created_at = document.getElementById('created_at').value.trim();
@@ -148,7 +171,7 @@ async function loadLinks(){
           <div class="font-medium">${it.title}</div>
           <div class="text-sm text-slate-600 break-all">${it.target_url}</div>
           <div class="text-sm">Slug: <span class="font-mono">${it.slug}</span> • Clicks: <b>${it.clicks_count ?? 0}</b></div>
-          <div class="text-sm">Short: <a class="underline text-blue-700" href="${shortUrl}" target="_blank">${shortUrl}</a></div>
+          <div class="text-sm">Short: <a class="underline text-blue-700" href="${shortUrl}" target="_blank" rel="noopener" onclick="scheduleRefresh(1200)">${shortUrl}</a></div>
         </div>
         <div class="mt-3 md:mt-0 flex gap-2">
           <button class="px-3 py-2 rounded bg-emerald-600 text-white" onclick="showStats(${it.id}, '${it.title.replace(/'/g, "\\'")}')">Stats</button>
@@ -220,6 +243,15 @@ window.addEventListener('load', ()=>{
   if(t){ state.access=t; state.username=u || null; toast('Đã dùng token sẵn có'); updateAuthUI(); loadLinks(); }
   else { updateAuthUI(); }
 });
+
+// Auto-refresh helpers: refresh after click and when returning focus
+let refreshTimer = null;
+function scheduleRefresh(delay=1000){
+  if(!state.access) return;
+  if(refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(async ()=>{ await loadLinks(); refreshTimer=null; }, delay);
+}
+window.addEventListener('focus', ()=>{ scheduleRefresh(200); });
 </script>
 </body>
 </html>
